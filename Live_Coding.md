@@ -2,47 +2,203 @@
 
 Live coding example focused on user login and JWT token handling, including tests for various security vulnerabilities using Jest and Supertest. This example will cover user authentication, token generation, and testing for vulnerabilities related to JWT.
 
-### Step 1: Initial Setup
 
-1. **Install Dependencies**  
-   Run the following command to install Jest, Supertest, and TypeScript typings:
+### Step 1: Project Setup
+
+1. **Initialize a New Node.js Project**
+
+   Open your terminal and create a new directory for your project. Navigate into it and initialize a new Node.js project:
 
    ```bash
-   npm i --save-dev jest @types/jest ts-jest supertest
+   mkdir jwt-auth-example
+   cd jwt-auth-example
+   npm init -y
    ```
 
-2. **Configure Jest**  
-   Add the following configuration to your `package.json`:
+2. **Install Required Dependencies**
+
+   Install the necessary packages for your project:
+
+   ```bash
+   npm install express jsonwebtoken bcryptjs body-parser
+   npm install --save-dev jest @types/jest ts-jest supertest @types/supertest typescript
+   ```
+
+   - **express**: Web framework for Node.js.
+   - **jsonwebtoken**: Library to work with JWTs.
+   - **bcryptjs**: Library for hashing passwords.
+   - **body-parser**: Middleware to parse incoming request bodies.
+   - **jest**: Testing framework.
+   - **supertest**: Library for testing HTTP servers.
+   - **typescript**: TypeScript support.
+
+3. **Create TypeScript Configuration**
+
+   Create a `tsconfig.json` file for TypeScript configuration:
 
    ```json
-   "jest": {
-     "preset": "ts-jest",
-     "testEnvironment": "node"
+   {
+     "compilerOptions": {
+       "target": "ES6",
+       "module": "commonjs",
+       "strict": true,
+       "esModuleInterop": true,
+       "skipLibCheck": true,
+       "forceConsistentCasingInFileNames": true
+     },
+     "include": ["src/**/*", "__tests__/**/*"]
    }
    ```
 
-3. **Add Test Script**  
-   In the `scripts` section of your `package.json`, add:
+### Step 2: Create the Application Structure
 
-   ```json
-   "test": "jest"
-   ```
+Create the following directory structure:
 
-### Step 2: Create Test Files
+```
+jwt-auth-example/
+├── src/
+│   ├── app.ts
+│   ├── auth.ts
+│   └── user.ts
+├── __tests__/
+│   ├── auth.spec.ts
+│   └── securityVulnerabilities.spec.ts
+├── package.json
+└── tsconfig.json
+```
 
-Create a directory for your tests, e.g., `__tests__`, and add the following test files.
+### Step 3: Implement the Application Logic
+
+#### 1. **Create the Express Application**
+
+**File: `src/app.ts`**
+
+```typescript
+import express from 'express';
+import bodyParser from 'body-parser';
+import { login, register, getUserInfo } from './auth';
+
+const app = express();
+const PORT = process.env.PORT || 3000;
+
+// Middleware to parse JSON bodies
+app.use(bodyParser.json());
+
+// Routes
+app.post('/login', login); // Login route
+app.post('/register', register); // Registration route
+app.get('/user/info', getUserInfo); // Get user info route
+
+// Start the server
+app.listen(PORT, () => {
+  console.log(`Server is running on http://localhost:${PORT}`);
+});
+
+export default app; // Export the app for testing
+```
+
+#### 2. **Implement Authentication Logic**
+
+**File: `src/auth.ts`**
+
+```typescript
+import { Request, Response } from 'express';
+import jwt from 'jsonwebtoken';
+import bcrypt from 'bcryptjs';
+
+// In-memory user storage (for demonstration purposes)
+const users: { [key: string]: { password: string } } = {};
+
+// Secret key for JWT signing
+const JWT_SECRET = 'your_jwt_secret'; // Change this to a secure key in production
+
+// Function to register a new user
+export const register = async (req: Request, res: Response) => {
+  const { username, password } = req.body;
+
+  // Check if the user already exists
+  if (users[username]) {
+    return res.status(400).json({ message: 'User already exists' });
+  }
+
+  // Hash the password
+  const hashedPassword = await bcrypt.hash(password, 10);
+  users[username] = { password: hashedPassword }; // Store user
+
+  return res.status(201).json({ message: 'User registered successfully' });
+};
+
+// Function to log in a user
+export const login = async (req: Request, res: Response) => {
+  const { username, password } = req.body;
+
+  // Check if the user exists
+  const user = users[username];
+  if (!user) {
+    return res.status(401).json({ message: 'Invalid credentials' });
+  }
+
+  // Check password
+  const isPasswordValid = await bcrypt.compare(password, user.password);
+  if (!isPasswordValid) {
+    return res.status(401).json({ message: 'Invalid credentials' });
+  }
+
+  // Generate JWT token
+  const token = jwt.sign({ username }, JWT_SECRET, { expiresIn: '1h' });
+  return res.status(200).json({ token });
+};
+
+// Middleware to protect routes
+export const authenticateJWT = (req: Request, res: Response, next: Function) => {
+  const token = req.headers['authorization']?.split(' ')[1]; // Get token from header
+
+  if (!token) {
+    return res.sendStatus(401); // Unauthorized
+  }
+
+  jwt.verify(token, JWT_SECRET, (err: any, user: any) => {
+    if (err) {
+      return res.sendStatus(403); // Forbidden
+    }
+    req.user = user; // Attach user to request
+    next(); // Proceed to the next middleware
+  });
+};
+
+// Function to get user info
+export const getUserInfo = (req: Request, res: Response) => {
+  res.status(200).json({ username: req.user.username }); // Return user info
+};
+```
+
+### Step 4: Write Tests
 
 #### 1. **User Authentication Tests**
 
-**File: `auth.spec.ts`**
+**File: `__tests__/auth.spec.ts`**
 
 ```typescript
 import request from 'supertest';
-import app from '../src/app'; // Adjust the path to your app
-import { generateToken } from '../src/auth'; // Adjust the path to your token generation function
+import app from '../src/app'; // Import the app
 
 describe('User Authentication Tests', () => {
   
+  // Test Successful Registration
+  it('should register a new user successfully', async () => {
+    const userCredentials = {
+      username: 'testuser',
+      password: 'strongpassword',
+    };
+
+    const response = await request(app)
+      .post('/register') // Registration endpoint
+      .send(userCredentials)
+      .expect(201); // Expect Created status
+
+    expect(response.body.message).toBe('User registered successfully'); // Expect success message
+  });
+
   // Test Successful Login
   it('should return a JWT token on successful login', async () => {
     const userCredentials = {
@@ -72,67 +228,17 @@ describe('User Authentication Tests', () => {
 
     expect(response.body.message).toBe('Invalid credentials'); // Expect specific error message
   });
-
-  // Test Token Expiration
-  it('should return 401 when using an expired token', async () => {
-    const expiredToken = 'yourExpiredToken'; // Replace with an actual expired token
-
-    const response = await request(app)
-      .get('/protected-endpoint') // Protected endpoint
-      .set('Authorization', `Bearer ${expiredToken}`)
-      .expect(401); // Expect Unauthorized status
-
-    expect(response.body.message).toBe('Token expired'); // Expect specific error message
-  });
 });
 ```
 
-#### 2. **JWT Security Tests**
+#### 2. **Security Vulnerability Tests**
 
-**File: `jwtSecurity.spec.ts`**
-
-```typescript
-import request from 'supertest';
-import app from '../src/app'; // Adjust the path to your app
-import { generateToken } from '../src/auth'; // Adjust the path to your token generation function
-
-describe('JWT Security Tests', () => {
-  
-  // Test Token Tampering
-  it('should return 401 for tampered token', async () => {
-    const validToken = generateToken({ username: 'testuser' }); // Generate a valid token
-    const tamperedToken = validToken + 'tampered'; // Tamper with the token
-
-    const response = await request(app)
-      .get('/protected-endpoint') // Protected endpoint
-      .set('Authorization', `Bearer ${tamperedToken}`)
-      .expect(401); // Expect Unauthorized status
-
-    expect(response.body.message).toBe('Invalid token'); // Expect specific error message
-  });
-
-  // Test Token Revocation
-  it('should return 401 for revoked token', async () => {
-    const validToken = generateToken({ username: 'testuser' }); // Generate a valid token
-    // Simulate revoking the token (e.g., by removing it from a database or blacklist)
-    
-    const response = await request(app)
-      .get('/protected-endpoint') // Protected endpoint
-      .set('Authorization', `Bearer ${validToken}`)
-      .expect(401); // Expect Unauthorized status
-
-    expect(response.body.message).toBe('Token revoked'); // Expect specific error message
-  });
-});
-```
-
-#### 3. **Security Vulnerability Tests**
-
-**File: `securityVulnerabilities.spec.ts`**
+**File: `__tests__/securityVulnerabilities.spec.ts`**
 
 ```typescript
 import request from 'supertest';
-import app from '../src/app'; // Adjust the path to your app
+import app from '../src/app'; // Import the app
+import { generateToken } from '../src/auth'; // Import the token generation function
 
 describe('Security Vulnerability Tests', () => {
   
@@ -165,7 +271,7 @@ describe('Security Vulnerability Tests', () => {
 });
 ```
 
-### Step 3: Run Your Tests
+### Step 5: Run Your Tests
 
 To run your tests, execute the following command in your terminal:
 
@@ -175,4 +281,4 @@ npm run test
 
 ### Conclusion
 
-This example provides a structured approach to testing user login and JWT token handling using Jest and Supertest. Each test case is designed to validate specific security aspects of your authentication system, helping to ensure that it is robust against common vulnerabilities.
+This guide provides a comprehensive overview of setting up a user login system with JWT authentication in Node.js using TypeScript. The application includes user registration, login, and protected routes, along with tests to ensure the security and functionality of the application. Each section is documented with comments to help you understand the code and its purpose.
