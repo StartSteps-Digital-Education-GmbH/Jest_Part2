@@ -1,4 +1,4 @@
-Here's a step-by-step coding example for testing API vulnerabilities using Jest, with explanations included as comments. This example will cover the initial setup, configuration, and a few test cases based on the vulnerabilities mentioned in your guide.
+# Live Code
 
 ### Step 1: Initial Setup
 
