@@ -1,5 +1,7 @@
 # Live Code
 
+Live coding example focused on user login and JWT token handling, including tests for various security vulnerabilities using Jest and Supertest. This example will cover user authentication, token generation, and testing for vulnerabilities related to JWT.
+
 ### Step 1: Initial Setup
 
 1. **Install Dependencies**  
@@ -30,161 +32,135 @@
 
 Create a directory for your tests, e.g., `__tests__`, and add the following test files.
 
-#### 1. **Broken Access Control Tests**
+#### 1. **User Authentication Tests**
 
-**File: `brokenAccessControl.spec.ts`**
-
-```typescript
-import request from 'supertest';
-import app from '../src/app'; // Adjust the path to your app
-
-describe('Broken Access Control Tests', () => {
-  
-  // Test Unauthorized Access
-  it('should return a 403 status code when attempting to access a protected endpoint without credentials', async () => {
-    await request(app)
-      .get('/protected-endpoint') // Protected endpoint
-      .expect(403); // Expect Forbidden status
-  });
-
-  // Test Vertical Access
-  it('should return a 401 status code when attempting to perform an admin action being a regular user', async () => {
-    const regularUserToken = 'yourRegularUserToken'; // Replace with actual token
-    await request(app)
-      .post('/admin/action') // Admin action endpoint
-      .set('Authorization', `Bearer ${regularUserToken}`)
-      .send({ data: 'someData' })
-      .expect(401); // Expect Unauthorized status
-  });
-
-  // Test Horizontal Access
-  it('should return a 401 status code when attempting to access another user\'s client', async () => {
-    const userAToken = 'userAToken'; // Replace with actual token
-    await request(app)
-      .get('/clients/B') // Attempt to access user B's client
-      .set('Authorization', `Bearer ${userAToken}`)
-      .expect(401); // Expect Unauthorized status
-  });
-});
-```
-
-#### 2. **Cryptographic Failures Tests**
-
-**File: `cryptographicFailures.spec.ts`**
-
-```typescript
-import { encryptWithKey, decryptWithKey } from '../src/crypto'; // Adjust the path to your crypto functions
-
-describe('Cryptographic Failures Tests', () => {
-  
-  // Test key management
-  it('should fail when decrypting with incorrect key', () => {
-    const data = 'Sensitive information';
-    const keyA = 'correctKey'; // Replace with actual key generation
-    const keyB = 'incorrectKey'; // Incorrect key
-    const encrypted = encryptWithKey(data, keyA); // Encrypt data
-
-    const decryptedCorrect = decryptWithKey(encrypted, keyA); // Decrypt with correct key
-    const decryptedIncorrect = decryptWithKey(encrypted, keyB); // Decrypt with incorrect key
-
-    expect(decryptedCorrect).not.toBeNull(); // Expect successful decryption
-    expect(decryptedIncorrect).toBeNull(); // Expect failed decryption
-  });
-});
-```
-
-#### 3. **Injection Tests**
-
-**File: `injection.spec.ts`**
+**File: `auth.spec.ts`**
 
 ```typescript
 import request from 'supertest';
 import app from '../src/app'; // Adjust the path to your app
+import { generateToken } from '../src/auth'; // Adjust the path to your token generation function
 
-describe('Injection Tests', () => {
+describe('User Authentication Tests', () => {
   
-  // SQL Injection Test
-  it('should return 400 for SQL injection attempt in query params', async () => {
-    const response = await request(app)
-      .get(`/products?id=' OR 1=1 --`) // Malicious SQL injection
-      .send();
-    
-    expect(response.status).toBe(400); // Expect Bad Request
-    expect(response.body.message).toBe('invalid input syntax for integer'); // Expect specific error message
-  });
-
-  // XSS Test
-  it('should sanitize user input to prevent XSS attacks', async () => {
-    const newUser = {
-      username: 'username',
-      email: 'user@example.com',
-      password: 'password',
-      profile: 'User profile <script>alert("XSS vulnerability");</script>', // Malicious input
+  // Test Successful Login
+  it('should return a JWT token on successful login', async () => {
+    const userCredentials = {
+      username: 'testuser',
+      password: 'strongpassword',
     };
-    
+
     const response = await request(app)
-      .post('/users') // User creation endpoint
-      .send(newUser);
-    
-    expect(response.status).toBe(201); // Expect Created status
-    expect(response.body.profile).not.toMatch(/<script>/i); // Expect <script> tag to be sanitized
+      .post('/login') // Login endpoint
+      .send(userCredentials)
+      .expect(200); // Expect OK status
+
+    expect(response.body.token).toBeDefined(); // Expect a token to be returned
+  });
+
+  // Test Invalid Credentials
+  it('should return 401 for invalid credentials', async () => {
+    const userCredentials = {
+      username: 'testuser',
+      password: 'wrongpassword',
+    };
+
+    const response = await request(app)
+      .post('/login') // Login endpoint
+      .send(userCredentials)
+      .expect(401); // Expect Unauthorized status
+
+    expect(response.body.message).toBe('Invalid credentials'); // Expect specific error message
+  });
+
+  // Test Token Expiration
+  it('should return 401 when using an expired token', async () => {
+    const expiredToken = 'yourExpiredToken'; // Replace with an actual expired token
+
+    const response = await request(app)
+      .get('/protected-endpoint') // Protected endpoint
+      .set('Authorization', `Bearer ${expiredToken}`)
+      .expect(401); // Expect Unauthorized status
+
+    expect(response.body.message).toBe('Token expired'); // Expect specific error message
   });
 });
 ```
 
-#### 4. **Insecure Design Tests**
+#### 2. **JWT Security Tests**
 
-**File: `insecureDesign.spec.ts`**
+**File: `jwtSecurity.spec.ts`**
+
+```typescript
+import request from 'supertest';
+import app from '../src/app'; // Adjust the path to your app
+import { generateToken } from '../src/auth'; // Adjust the path to your token generation function
+
+describe('JWT Security Tests', () => {
+  
+  // Test Token Tampering
+  it('should return 401 for tampered token', async () => {
+    const validToken = generateToken({ username: 'testuser' }); // Generate a valid token
+    const tamperedToken = validToken + 'tampered'; // Tamper with the token
+
+    const response = await request(app)
+      .get('/protected-endpoint') // Protected endpoint
+      .set('Authorization', `Bearer ${tamperedToken}`)
+      .expect(401); // Expect Unauthorized status
+
+    expect(response.body.message).toBe('Invalid token'); // Expect specific error message
+  });
+
+  // Test Token Revocation
+  it('should return 401 for revoked token', async () => {
+    const validToken = generateToken({ username: 'testuser' }); // Generate a valid token
+    // Simulate revoking the token (e.g., by removing it from a database or blacklist)
+    
+    const response = await request(app)
+      .get('/protected-endpoint') // Protected endpoint
+      .set('Authorization', `Bearer ${validToken}`)
+      .expect(401); // Expect Unauthorized status
+
+    expect(response.body.message).toBe('Token revoked'); // Expect specific error message
+  });
+});
+```
+
+#### 3. **Security Vulnerability Tests**
+
+**File: `securityVulnerabilities.spec.ts`**
 
 ```typescript
 import request from 'supertest';
 import app from '../src/app'; // Adjust the path to your app
 
-describe('Insecure Design Tests', () => {
+describe('Security Vulnerability Tests', () => {
   
   // Test Unprotected Sensitive Data
-  it('should not return the user password when fetching the user', async () => {
+  it('should not return sensitive user data when fetching user info', async () => {
+    const validToken = 'yourValidToken'; // Replace with an actual valid token
+
     const response = await request(app)
-      .get('/user/1') // Fetch user endpoint
+      .get('/user/info') // User info endpoint
+      .set('Authorization', `Bearer ${validToken}`)
       .expect(200); // Expect OK status
-    
-    expect(response.body.data.password).not.toBeDefined(); // Password should not be included
+
+    expect(response.body.password).toBeUndefined(); // Password should not be included
   });
 
-  // Testing Insecure Password
-  it('should enforce strong password requirements', async () => {
+  // Test Weak Password Enforcement
+  it('should enforce strong password requirements during registration', async () => {
+    const weakUser = {
+      username: 'newuser',
+      password: '123', // Weak password
+    };
+
     const response = await request(app)
-      .post('/user') // User creation endpoint
-      .send({
-        username: 'username',
-        password: 'weakpassword' // Weak password
-      })
+      .post('/register') // Registration endpoint
+      .send(weakUser)
       .expect(422); // Expect Unprocessable Entity status
-    
-    expect(response.body.message).toBe('password is not strong enough'); // Expect specific error message
-  });
-});
-```
 
-#### 5. **Security Misconfiguration Tests**
-
-**File: `securityMisconfiguration.spec.ts`**
-
-```typescript
-import request from 'supertest';
-import app from '../src/app'; // Adjust the path to your app
-
-describe('Security Misconfiguration Tests', () => {
-  
-  // Security Headers Test
-  it('should include security headers', async () => {
-    const response = await request(app)
-      .get('/endpoint') // Endpoint to check security headers
-      .expect(200); // Expect OK status
-    
-    expect(response.headers['Content-Security-Policy']).toBeDefined(); // Check for CSP header
-    expect(response.headers['X-Frame-Options']).toBeDefined(); // Check for X-Frame-Options header
-    expect(response.headers['X-Frame-Options']).toBe('deny'); // Expect deny option
+    expect(response.body.message).toBe('Password is not strong enough'); // Expect specific error message
   });
 });
 ```
@@ -199,4 +175,4 @@ npm run test
 
 ### Conclusion
 
-This example provides a structured approach to testing API vulnerabilities using Jest. Each test case is designed to validate specific security aspects of your application, helping to ensure that it is robust against common vulnerabilities.
+This example provides a structured approach to testing user login and JWT token handling using Jest and Supertest. Each test case is designed to validate specific security aspects of your authentication system, helping to ensure that it is robust against common vulnerabilities.
